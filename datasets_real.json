@@ -5,7 +5,7 @@
     "source": "hf",
     "format": "alpaca",
     "split": "train",
-    "limit": 2000
+    "limit": null
   },
   {
     "name": "ultrachat",
@@ -14,7 +14,7 @@
     "format": "chat",
     "split": "train_sft",
     "streaming": true,
-    "limit": 2000
+    "limit": null
   },
   {
     "name": "aya",
@@ -22,7 +22,7 @@
     "source": "hf",
     "format": "pair",
     "split": "train",
-    "limit": 2000,
+    "limit": null,
     "prompt_field": "inputs",
     "response_field": "targets",
     "streaming": true
