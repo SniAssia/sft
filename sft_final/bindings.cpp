@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 #include <pybind11/stl.h>
 
-#include "uds/data_pipeline.hpp"
+#include "data_pipeline.hpp"
 
 namespace py = pybind11;
 using namespace uds;
