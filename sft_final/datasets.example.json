@@ -1,0 +1,4 @@
+[
+  {"name": "alpaca_en", "path": "tatsu-lab/alpaca", "format": "alpaca", "split": "train", "source": "hf"},
+  {"name": "sharegpt",  "path": "./data/sharegpt.jsonl", "format": "chat", "source": "jsonl"}
+]
