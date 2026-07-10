@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 #include <pybind11/stl.h>
 
-#include "data_pipeline.hpp"
+#include "uds/data_pipeline.hpp"
 
 namespace py = pybind11;
 using namespace uds;
@@ -21,9 +21,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def_readwrite("num_epochs", &PipelineConfig::num_epochs)
         .def_readwrite("max_queue_occupancy", &PipelineConfig::max_queue_occupancy)
         .def_readwrite("B", &PipelineConfig::B)
-        .def_readwrite("homogeneous", &PipelineConfig::homogeneous)
-        .def_readwrite("fit_band_weights", &PipelineConfig::fit_band_weights)
-        .def_readwrite("chunked_rate", &PipelineConfig::chunked_rate)
+        .def_readwrite("profile_bands", &PipelineConfig::profile_bands)
+        .def_readwrite("profile_mix", &PipelineConfig::profile_mix)
+        .def_readwrite("profile_prob", &PipelineConfig::profile_prob)
+        .def_readwrite("profile_is_chunked", &PipelineConfig::profile_is_chunked)
+        .def_readwrite("hungry_retries", &PipelineConfig::hungry_retries)
         .def_readwrite("pad_id", &PipelineConfig::pad_id)
         .def_readwrite("ignore_index", &PipelineConfig::ignore_index)
         .def_readwrite("option_b_window", &PipelineConfig::option_b_window)
@@ -37,6 +39,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def_readonly("labels", &CollatedPool::labels)
         .def_readonly("is_chunked", &CollatedPool::is_chunked)
         .def_readonly("band", &CollatedPool::band)
+        .def_readonly("profile_index", &CollatedPool::profile_index)
+        .def_readonly("mixed", &CollatedPool::mixed)
+        .def_readonly("fell_back", &CollatedPool::fell_back)
         .def_readonly("prompt_len", &CollatedPool::prompt_len)
         .def_readonly("context_len", &CollatedPool::context_len)
         .def_readonly("response_len", &CollatedPool::response_len)
@@ -58,5 +63,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def("stall_total_s", &DataPipeline::stall_total_s)
         .def("stall_mean_ms", &DataPipeline::stall_mean_ms)
         .def("samples_streamed", &DataPipeline::samples_streamed)
-        .def("queue_size", &DataPipeline::queue_size);
+        .def("queue_size", &DataPipeline::queue_size)
+        .def("empty_alerts", &DataPipeline::empty_alerts)
+        .def("fallback_pools", &DataPipeline::fallback_pools);
 }

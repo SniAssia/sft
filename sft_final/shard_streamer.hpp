@@ -69,14 +69,24 @@ private:
 
         for (uint32_t idx : order) {
             if (!running_) return;
-            // backpressure: block while the target band is saturated
             uint32_t band = reader.band_of(idx);
-            while (running_ && queues_.size(band) >= cfg_.max_queue_occupancy)
+            // Backpressure: normally block while this band is saturated. BUT if any
+            // band is hungry (a queue ran dry in the scheduler), don't idle — rush to
+            // push whatever we have so starving queues get fed as fast as possible.
+            while (running_ && queues_.size(band) >= cfg_.max_queue_occupancy
+                   && !any_hungry_())
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             if (!running_) return;
             queues_.push(reader.get(idx));
+            queues_.clear_hungry(band);   // this band just got fed
             streamed_.fetch_add(1, std::memory_order_relaxed);
         }
+    }
+
+    bool any_hungry_() const {
+        for (uint32_t b = 0; b < NUM_BANDS; ++b)
+            if (queues_.is_hungry(b)) return true;
+        return false;
     }
 
     StreamerConfig cfg_;

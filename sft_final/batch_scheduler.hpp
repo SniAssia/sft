@@ -1,14 +1,19 @@
 // batch_scheduler.hpp
-// Phase 8 — the configurable batch scheduler. Emits UDS candidate pools of
-// size B. Two modes:
-//   HOMOGENEOUS (default): each pool is drawn from ONE fit band (chosen by
-//       weighted random over non-empty bands) so downstream SVD/collation sees
-//       minimal padding, while content stays diverse.
-//   MIXED: pool composed across fit bands per configured ratios (the 30/70 knob) —
-//       more padding, full control of composition.
-// Chunked samples are ALWAYS pooled separately (Option-B path), never padded
-// into a fit pool. Chunked pools are emitted at a configured rate.
+// Phase 8 — Profile-based batch scheduler with demand signaling.
+//
+// The scheduler samples one batch profile according to profile probabilities.
+// When a requested band is empty it:
+//
+//   1. Marks the band as hungry.
+//   2. Gives the streamer a few chances to refill it.
+//   3. Falls back to the other band if necessary.
+//
+// Every hungry event and fallback is counted for benchmarking.
+
 #pragma once
+
+#include <array>
+#include <atomic>
 #include <random>
 #include <vector>
 
@@ -16,98 +21,243 @@
 #include "sample.hpp"
 
 namespace uds {
-
-enum class PoolMode { Homogeneous, Mixed };
-
+struct BatchProfile {
+    std::array<int,2> bands = {BAND_SHORT, BAND_MEDIUM};
+    std::array<float,2> mix = {0.5f, 0.5f};
+    float prob = 1.f / 3.f;
+    bool is_chunked = false;
+};
 struct SchedulerConfig {
-    size_t B = 64;                          // candidate pool (oversampling) size, B > K
-    PoolMode mode = PoolMode::Homogeneous;
-    // weights over fit bands [SHORT, MEDIUM, LONG]; chunked handled separately
-    std::array<float, 3> fit_band_weights = {1.f, 1.f, 1.f};
-    float chunked_rate = 0.1f;              // fraction of pools drawn from CHUNKED
+    size_t B = 64;
+
+    std::vector<BatchProfile> profiles;
+
     int pop_timeout_ms = 50;
+    int hungry_retries = 2;
+
     uint64_t seed = 777;
 };
-
 class BatchScheduler {
 public:
-    BatchScheduler(SchedulerConfig cfg, LengthAwareQueues& queues)
-        : cfg_(cfg), queues_(queues), rng_(cfg.seed) {}
 
-    // Blocks (bounded) until a full pool of size B is assembled, or returns a
-    // short/empty pool if the queues are draining and cannot fill one.
-    CandidatePool next_pool() {
-        if (want_chunked_()) {
-            CandidatePool p = drain_band_(BAND_CHUNKED, cfg_.B);
-            if (!p.samples.empty()) { p.is_chunked = true; p.band = BAND_CHUNKED; return p; }
-            // fall through to fit pool if no chunked samples available
+    BatchScheduler(
+        SchedulerConfig cfg,
+        LengthAwareQueues& queues)
+        : cfg_(std::move(cfg)),
+          queues_(queues),
+          rng_(cfg_.seed)
+    {
+        if (cfg_.profiles.empty())
+            install_default_profiles_();
+
+        build_cdf_();
+    }
+
+    CandidatePool next_pool()
+    {
+        const int profile_index = pick_profile_();
+        const BatchProfile& profile = cfg_.profiles[profile_index];
+
+        CandidatePool pool;
+
+        pool.profile_index = profile_index;
+        pool.profile_bands = profile.bands;
+        pool.is_chunked    = profile.is_chunked;
+        pool.mixed         = !profile.is_chunked &&
+                             profile.bands[0] != profile.bands[1];
+        pool.band = static_cast<uint32_t>(profile.bands[0]);
+        if (profile.is_chunked ||
+            profile.bands[0] == profile.bands[1])
+        {
+            fill_band_(
+                static_cast<uint32_t>(profile.bands[0]),
+                cfg_.B,
+                pool);
+
+            return pool;
         }
-        return cfg_.mode == PoolMode::Homogeneous ? homogeneous_pool_() : mixed_pool_();
+        size_t target0 =
+            static_cast<size_t>(profile.mix[0] * cfg_.B + 0.5f);
+
+        if (target0 > cfg_.B)
+            target0 = cfg_.B;
+
+        size_t target1 = cfg_.B - target0;
+
+        size_t got0 =
+            fill_band_(
+                static_cast<uint32_t>(profile.bands[0]),
+                target0,
+                pool);
+
+        size_t got1 =
+            fill_band_(
+                static_cast<uint32_t>(profile.bands[1]),
+                target1,
+                pool);
+        size_t remaining = cfg_.B - pool.samples.size();
+
+        if (remaining > 0)
+        {
+            // Band 0 starved
+            if (got0 < target0 && got1 == target1)
+            {
+                queues_.set_hungry(
+                    static_cast<uint32_t>(profile.bands[0]));
+
+                empty_alerts_[profile.bands[0]]
+                    .fetch_add(1, std::memory_order_relaxed);
+
+                if (fill_band_(
+                        static_cast<uint32_t>(profile.bands[1]),
+                        remaining,
+                        pool) > 0)
+                {
+                    pool.fell_back = true;
+                }
+            }
+            else if (got1 < target1)
+            {
+                queues_.set_hungry(
+                    static_cast<uint32_t>(profile.bands[1]));
+
+                empty_alerts_[profile.bands[1]]
+                    .fetch_add(1, std::memory_order_relaxed);
+
+                if (fill_band_(
+                        static_cast<uint32_t>(profile.bands[0]),
+                        remaining,
+                        pool) > 0)
+                {
+                    pool.fell_back = true;
+                }
+            }
+        }
+
+        if (pool.fell_back)
+        {
+            fallback_pools_.fetch_add(
+                1,
+                std::memory_order_relaxed);
+        }
+
+        return pool;
+    }
+    uint64_t empty_alerts(uint32_t band) const
+    {
+        return empty_alerts_[band].load(std::memory_order_relaxed);
+    }
+
+    uint64_t fallback_pools() const
+    {
+        return fallback_pools_.load(std::memory_order_relaxed);
     }
 
 private:
-    bool want_chunked_() {
-        if (cfg_.chunked_rate <= 0.f) return false;
-        std::uniform_real_distribution<float> u(0.f, 1.f);
-        return u(rng_) < cfg_.chunked_rate && queues_.size(BAND_CHUNKED) > 0;
-    }
+    void install_default_profiles_()
+    {
+        cfg_.profiles = {
 
-    // Pick one non-empty fit band by weight; fill the whole pool from it.
-    CandidatePool homogeneous_pool_() {
-        int band = pick_fit_band_();
-        CandidatePool p;
-        if (band < 0) return p;               // all empty
-        p = drain_band_(static_cast<uint32_t>(band), cfg_.B);
-        p.band = static_cast<uint32_t>(band);
-        p.is_chunked = false;
-        return p;
-    }
+            BatchProfile{
+                {BAND_SHORT, BAND_MEDIUM},
+                {0.5f,0.5f},
+                1.f/3.f,
+                false
+            },
 
-    // Compose across fit bands per weights (normalized to counts summing to B).
-    CandidatePool mixed_pool_() {
-        CandidatePool p;
-        float wsum = cfg_.fit_band_weights[0] + cfg_.fit_band_weights[1] + cfg_.fit_band_weights[2];
-        if (wsum <= 0.f) return p;
-        for (int b = 0; b < 3; ++b) {
-            size_t take = static_cast<size_t>((cfg_.fit_band_weights[b] / wsum) * cfg_.B);
-            CandidatePool part = drain_band_(static_cast<uint32_t>(b), take);
-            for (auto& s : part.samples) p.samples.push_back(std::move(s));
+            BatchProfile{
+                {BAND_MEDIUM, BAND_LONG},
+                {0.5f,0.5f},
+                1.f/3.f,
+                false
+            },
+
+            BatchProfile{
+                {BAND_CHUNKED, BAND_CHUNKED},
+                {1.f,0.f},
+                1.f/3.f,
+                true
+            }
+        };
+    }
+    void build_cdf_()
+    {
+        cdf_.clear();
+
+        float acc = 0.f;
+
+        for (const auto& p : cfg_.profiles)
+        {
+            acc += p.prob;
+            cdf_.push_back(acc);
         }
-        p.band = BAND_MEDIUM;   // heterogeneous; label as MEDIUM for bookkeeping
-        p.is_chunked = false;
-        return p;
+
+        total_prob_ = (acc > 0.f) ? acc : 1.f;
     }
 
-    int pick_fit_band_() {
-        float w[3];
-        float wsum = 0.f;
-        for (int b = 0; b < 3; ++b) {
-            bool nonempty = queues_.size(static_cast<uint32_t>(b)) > 0;
-            w[b] = nonempty ? cfg_.fit_band_weights[b] : 0.f;
-            wsum += w[b];
+    int pick_profile_()
+    {
+        std::uniform_real_distribution<float> dist(0.f, total_prob_);
+
+        const float r = dist(rng_);
+
+        for (size_t i = 0; i < cdf_.size(); ++i)
+        {
+            if (r <= cdf_[i])
+                return static_cast<int>(i);
         }
-        if (wsum <= 0.f) return -1;
-        std::uniform_real_distribution<float> u(0.f, wsum);
-        float r = u(rng_), acc = 0.f;
-        for (int b = 0; b < 3; ++b) { acc += w[b]; if (r <= acc) return b; }
-        return 2;
+
+        return static_cast<int>(cfg_.profiles.size() - 1);
+    }
+    size_t fill_band_(
+        uint32_t band,
+        size_t target,
+        CandidatePool& pool)
+    {
+        size_t taken = 0;
+        int retries = 0;
+
+        while (taken < target)
+        {
+            auto sample = queues_.band(band).try_pop();
+
+            if (!sample)
+            {
+                if (retries >= cfg_.hungry_retries)
+                    break;
+
+                ++retries;
+
+                queues_.set_hungry(band);
+
+                queues_.band(band).pop_wait(
+                    cfg_.pop_timeout_ms);
+
+                continue;
+            }
+
+            pool.samples.push_back(std::move(*sample));
+            ++taken;
+        }
+
+        return taken;
     }
 
-    // Pop up to `count` samples from one band. Waits briefly for the streamer.
-    CandidatePool drain_band_(uint32_t band, size_t count) {
-        CandidatePool p;
-        p.samples.reserve(count);
-        while (p.samples.size() < count) {
-            auto s = queues_.band(band).pop_wait(cfg_.pop_timeout_ms);
-            if (!s) break;   // timeout: queue drained for now
-            p.samples.push_back(std::move(*s));
-        }
-        return p;
-    }
+private:
 
     SchedulerConfig cfg_;
+
     LengthAwareQueues& queues_;
+
     std::mt19937_64 rng_;
+
+    std::vector<float> cdf_;
+
+    float total_prob_ = 1.f;
+
+    std::array<std::atomic<uint64_t>, NUM_BANDS> empty_alerts_{};
+
+    std::atomic<uint64_t> fallback_pools_{0};
 };
 
 } // namespace uds

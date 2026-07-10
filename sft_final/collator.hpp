@@ -33,6 +33,9 @@ struct CollatedPool {
     torch::Tensor labels;          // [P, T] long (targets; ignore_index elsewhere)
     bool is_chunked = false;
     int64_t band = 0;
+    int profile_index = -1;
+    bool mixed = false;
+    bool fell_back = false;
     // per-sample true zone lengths (pre-pad), for UDS bookkeeping / SeCO later
     std::vector<int64_t> prompt_len, context_len, response_len;
     std::vector<int64_t> is_chunked_flags, case_codes;
@@ -62,6 +65,9 @@ private:
         CollatedPool out;
         out.is_chunked = false;
         out.band = pool.band;
+        out.profile_index = pool.profile_index;
+        out.mixed = pool.mixed;
+        out.fell_back = pool.fell_back;
         out.input_ids      = torch::full({P, T}, cfg_.pad_id, opts);
         out.attention_mask = torch::zeros({P, T}, opts);
         out.labels         = torch::full({P, T}, cfg_.ignore_index, opts);
@@ -98,6 +104,9 @@ private:
         CollatedPool out;
         out.is_chunked = true;
         out.band = BAND_CHUNKED;
+        out.profile_index = pool.profile_index;
+        out.mixed = pool.mixed;
+        out.fell_back = pool.fell_back;
         out.input_ids      = torch::full({P, W}, cfg_.pad_id, opts);
         out.attention_mask = torch::zeros({P, W}, opts);
         out.labels         = torch::full({P, W}, cfg_.ignore_index, opts);

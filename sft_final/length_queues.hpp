@@ -3,6 +3,7 @@
 // O(1) insertion by precomputed band; no sorting, no tokenization here.
 #pragma once
 #include <array>
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -70,8 +71,17 @@ public:
     }
     void close_all() { for (auto& q : queues_) q.close(); }
 
+    // --- Option-A demand signaling (scheduler -> streamer) ---
+    // Scheduler sets a band "hungry" when it finds that queue empty; the streamer
+    // reads these flags and preferentially pushes samples of hungry bands. Cleared
+    // by the streamer once it has fed that band.
+    void set_hungry(uint32_t b) { hungry_[b].store(true, std::memory_order_relaxed); }
+    void clear_hungry(uint32_t b) { hungry_[b].store(false, std::memory_order_relaxed); }
+    bool is_hungry(uint32_t b) const { return hungry_[b].load(std::memory_order_relaxed); }
+
 private:
     std::array<SampleQueue, NUM_BANDS> queues_;
+    std::array<std::atomic<bool>, NUM_BANDS> hungry_{};  // all false initially
 };
 
 } // namespace uds

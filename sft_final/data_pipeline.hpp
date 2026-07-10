@@ -24,11 +24,20 @@ struct PipelineConfig {
     int num_epochs = -1;
     size_t max_queue_occupancy = 50000;
 
-    // scheduler
+    // scheduler — profile-based (Option A). Each profile mixes two bands.
+    // If profile_* are left empty, the scheduler installs 3 equal-probability
+    // defaults: [Short+Medium], [Medium+Long], [Chunked]. Set from Python as
+    // parallel lists:
+    //   profile_bands      = [[0,1],[1,2],[3,3]]
+    //   profile_mix        = [[0.5,0.5],[0.5,0.5],[1.0,0.0]]
+    //   profile_prob       = [0.3333,0.3333,0.3334]
+    //   profile_is_chunked = [False,False,True]
     size_t B = 64;
-    bool homogeneous = true;
-    std::array<float, 3> fit_band_weights = {1.f, 1.f, 1.f};
-    float chunked_rate = 0.1f;
+    std::vector<std::array<int, 2>>   profile_bands;
+    std::vector<std::array<float, 2>> profile_mix;
+    std::vector<float>                profile_prob;
+    std::vector<bool>                 profile_is_chunked;
+    int hungry_retries = 2;
 
     // collator
     int64_t pad_id = 0;
@@ -56,10 +65,19 @@ public:
 
         SchedulerConfig schcfg;
         schcfg.B = cfg_.B;
-        schcfg.mode = cfg_.homogeneous ? PoolMode::Homogeneous : PoolMode::Mixed;
-        schcfg.fit_band_weights = cfg_.fit_band_weights;
-        schcfg.chunked_rate = cfg_.chunked_rate;
         schcfg.seed = cfg_.seed;
+        schcfg.hungry_retries = cfg_.hungry_retries;
+        // build profiles from the parallel Python lists (if provided)
+        const size_t np = cfg_.profile_bands.size();
+        for (size_t i = 0; i < np; ++i) {
+            BatchProfile p;
+            p.bands = cfg_.profile_bands[i];
+            p.mix   = (i < cfg_.profile_mix.size())  ? cfg_.profile_mix[i]  : std::array<float,2>{0.5f,0.5f};
+            p.prob  = (i < cfg_.profile_prob.size()) ? cfg_.profile_prob[i] : 1.0f;
+            p.is_chunked = (i < cfg_.profile_is_chunked.size()) ? cfg_.profile_is_chunked[i] : false;
+            schcfg.profiles.push_back(p);
+        }
+        // if none provided, BatchScheduler installs the 3 equal-prob defaults
         scheduler_ = std::make_unique<BatchScheduler>(schcfg, *queues_);
 
         CollatorConfig ccfg;
@@ -98,6 +116,10 @@ public:
     uint64_t samples_streamed() const { return streamer_->samples_streamed(); }
 
     size_t queue_size(uint32_t band) const { return queues_->size(band); }
+
+    // profile / demand-signaling counters
+    uint64_t empty_alerts(uint32_t band) const { return scheduler_->empty_alerts(band); }
+    uint64_t fallback_pools() const { return scheduler_->fallback_pools(); }
 
 private:
     PipelineConfig cfg_;

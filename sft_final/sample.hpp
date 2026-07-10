@@ -3,6 +3,7 @@
 // scheduler compile and unit-test without libtorch. Only the collator turns
 // these into tensors.
 #pragma once
+#include <array>
 #include <cstdint>
 #include <vector>
 #include "shard_format.hpp"
@@ -30,8 +31,13 @@ struct Sample {
 // A candidate pool: B samples the scheduler emits for UDS scoring.
 struct CandidatePool {
     std::vector<Sample> samples;
-    uint32_t band = BAND_SHORT;   // homogeneous band (or BAND_CHUNKED)
+    uint32_t band = BAND_SHORT;   // primary band (bookkeeping)
     bool is_chunked = false;      // true => Option-B representative-window collation
+    // profile-based scheduling metadata
+    int profile_index = -1;             // which profile produced this pool
+    std::array<int, 2> profile_bands = {BAND_SHORT, BAND_SHORT};
+    bool mixed = false;                 // true for two-band profiles (P0/P1)
+    bool fell_back = false;             // a band was empty -> filled 100% from the other
 };
 
 } // namespace uds

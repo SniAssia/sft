@@ -11,9 +11,9 @@
 #include <string>
 #include <vector>
 
-#include "batch_scheduler.hpp"
-#include "length_queues.hpp"
-#include "shard_reader.hpp"
+#include "uds/batch_scheduler.hpp"
+#include "uds/length_queues.hpp"
+#include "uds/shard_reader.hpp"
 
 namespace fs = std::filesystem;
 using namespace uds;
@@ -52,29 +52,35 @@ int main(int argc, char** argv) {
                 total, band_counts[0], band_counts[1], band_counts[2], band_counts[3], chunked);
     assert(total == queues.total());
 
-    // Scheduler: homogeneous pools, no chunked (test determinism of banding).
+    // Scheduler: profile-based. Use the 3 default equal-probability profiles
+    // (P0 Short+Medium, P1 Medium+Long, P2 Chunked). Drain everything and check
+    // each pool's samples belong to that profile's declared bands.
     SchedulerConfig scfg;
     scfg.B = 4;
-    scfg.mode = PoolMode::Homogeneous;
-    scfg.chunked_rate = 0.0f;
     scfg.pop_timeout_ms = 5;
-    BatchScheduler sched(scfg, queues);
+    scfg.hungry_retries = 1;
+    BatchScheduler sched(scfg, queues);   // empty profiles -> defaults installed
 
-    int pools = 0, fit_samples = 0;
-    while (true) {
+    int pools = 0, total_samples = 0, fell_back = 0;
+    // Drain until every queue is empty (deterministic; random profile picking can
+    // otherwise strand a band's last few samples until its profile is chosen).
+    while (queues.total() > 0) {
         CandidatePool p = sched.next_pool();
-        if (p.samples.empty()) break;
-        // homogeneous invariant: every sample in the pool shares the pool band
-        for (auto& s : p.samples) assert(s.band == p.band);
-        fit_samples += static_cast<int>(p.samples.size());
+        if (p.samples.empty()) continue;   // picked a profile whose bands are momentarily empty
+        // profile invariant: every sample belongs to one of the profile's bands
+        for (auto& s : p.samples)
+            assert(static_cast<int>(s.band) == p.profile_bands[0] ||
+                   static_cast<int>(s.band) == p.profile_bands[1]);
+        if (p.fell_back) ++fell_back;
+        total_samples += static_cast<int>(p.samples.size());
         ++pools;
-        if (pools > 100000) break; // safety
+        if (pools > 1000000) break; // safety
     }
-    std::printf("[test] scheduler emitted %d pools, %d fit samples\n", pools, fit_samples);
+    std::printf("[test] scheduler emitted %d pools, %d samples, %d fell_back\n",
+                pools, total_samples, fell_back);
 
-    // all non-chunked samples should have been schedulable
-    int expected_fit = static_cast<int>(band_counts[0] + band_counts[1] + band_counts[2]);
-    assert(fit_samples == expected_fit);
+    // every streamed sample should eventually be schedulable across profiles
+    assert(total_samples == static_cast<int>(total));
 
     std::printf("[test] ALL ASSERTIONS PASSED\n");
     return 0;
