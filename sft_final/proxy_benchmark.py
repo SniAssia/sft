@@ -108,10 +108,13 @@ class EpochStats:
             },
         }
 
-
-def run_epoch_proxy(pipeline, model: Optional[ProxyModel] = None,
-                    max_pools: Optional[int] = None,
-                    idle_grace: int = 200) -> EpochStats:
+def run_epoch_proxy(
+    pipeline,
+    model: Optional[ProxyModel] = None,
+    method: str = "round_robin",
+    max_pools: Optional[int] = None,
+    idle_grace: int = 200,
+) -> EpochStats:
     """Drive the C++ pipeline for ONE epoch (no model) and aggregate proxy stats.
 
     `pipeline` is a started uds_loader.DataPipeline. `method` label is inferred.
@@ -119,8 +122,7 @@ def run_epoch_proxy(pipeline, model: Optional[ProxyModel] = None,
     (empty pools observed for `idle_grace` consecutive polls while streamer_done).
     """
     model = model or ProxyModel()
-    label =  "round_robin"
-    st = EpochStats(method=label)
+    st = EpochStats(method=method)
     t0 = time.perf_counter()
 
     idle = 0
@@ -166,7 +168,6 @@ def run_epoch_proxy(pipeline, model: Optional[ProxyModel] = None,
     st.formation_total_s = float(pipeline.formation_total_s())
     st.stall_total_s = float(pipeline.stall_total_s())
     return st
-
 
 
 def compare(ours: EpochStats, baseline: EpochStats) -> str:

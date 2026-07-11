@@ -50,7 +50,6 @@ def build_pipeline(args, meta, rank, world, baseline: bool):
     pc.prefetch_workers = args.prefetch_workers
     pc.ring_capacity = args.ring_capacity
     p = uds_loader.DataPipeline(pc)
-    p._baseline = baseline                  # label for the proxy loop
     return p
 
 
@@ -103,16 +102,23 @@ def main():
     # ---- ours (round-robin categories) ----
     p_ours = build_pipeline(args, meta, rank, world, baseline=False)
     p_ours.start()
-    ours = run_epoch_proxy(p_ours, model)
+    ours = run_epoch_proxy(
+    p_ours,
+    model,
+    method="round_robin",
+    )
+
     p_ours.stop()
-    ours.method = "round_robin"
 
     # ---- baseline (length-agnostic random batching) ----
     p_base = build_pipeline(args, meta, rank, world, baseline=True)
     p_base.start()
-    base = run_epoch_proxy(p_base, model)
+    base = run_epoch_proxy(
+    p_base,
+    model,
+    method="baseline",
+    )
     p_base.stop()
-    base.method = "baseline"
 
     ours = all_reduce_stats(ours, dist)
     base = all_reduce_stats(base, dist)
