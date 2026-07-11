@@ -119,7 +119,7 @@ def run_epoch_proxy(pipeline, model: Optional[ProxyModel] = None,
     (empty pools observed for `idle_grace` consecutive polls while streamer_done).
     """
     model = model or ProxyModel()
-    label = "baseline" if _is_baseline(pipeline) else "round_robin"
+    label =  "round_robin"
     st = EpochStats(method=label)
     t0 = time.perf_counter()
 
@@ -167,11 +167,6 @@ def run_epoch_proxy(pipeline, model: Optional[ProxyModel] = None,
     st.stall_total_s = float(pipeline.stall_total_s())
     return st
 
-
-def _is_baseline(pipeline) -> bool:
-    # best-effort: baseline pools set .baseline on the pool; we can't read config,
-    # so callers should label explicitly if needed. Default False.
-    return getattr(pipeline, "_baseline", False)
 
 
 def compare(ours: EpochStats, baseline: EpochStats) -> str:
