@@ -89,7 +89,7 @@ public:
         PrefetchConfig pcfg;
         pcfg.num_workers = cfg_.prefetch_workers;
         pcfg.ring_capacity = cfg_.ring_capacity;
-        prefetcher_ = std::make_unique<Prefetcher>(pcfg, *scheduler_, *collator_);
+        prefetcher_ = std::make_unique<Prefetcher>(prefetch_cfg, *scheduler_, *collator_, *streamer_);
     }
 
     ~DataPipeline() { stop(); }
