@@ -90,6 +90,11 @@ private:
         if (cat.is_chunked || cat.bands[0] == cat.bands[1]) return band_dry(cat.bands[0]);
         return band_dry(cat.bands[0]) && band_dry(cat.bands[1]);
     }
+    bool all_categories_dry() const {
+        for (const auto& cat : cfg_.profiles)
+            if (!category_dry_(cat)) return false;
+        return true;
+    }
 
     CandidatePool fill_category_(const BatchProfile& cat, int ci) {
         CandidatePool pool;
