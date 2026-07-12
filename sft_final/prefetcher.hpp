@@ -43,19 +43,26 @@ public:
         for (auto& t : workers_) if (t.joinable()) t.join();
         workers_.clear();
     }
-
-    // Consumer side. Blocks until a pool is ready. Records stall time.
+    // Consumer side. Returns nullptr on timeout when epoch is done.
     std::shared_ptr<CollatedPool> next() {
         double t0 = now_s();
         std::unique_lock<std::mutex> lk(m_);
-        cv_not_empty_.wait(lk, [&] { return !ring_.empty() || !running_; });
-        if (ring_.empty()) return nullptr;
-        auto p = ring_.front();
-        ring_.pop_front();
-        lk.unlock();
-        cv_not_full_.notify_one();
-        stall_stat_.add(now_s() - t0);
-        return p;
+        // Use wait_for so we can return nullptr when the streamer is done + ring empty
+        while (true) {
+            if (!ring_.empty()) {
+                auto p = ring_.front();
+                ring_.pop_front();
+                lk.unlock();
+                cv_not_full_.notify_one();
+                stall_stat_.add(now_s() - t0);
+                return p;
+            }
+            if (!running_) {
+                return nullptr;
+            }
+            // timed wait — lets the caller check streamer_done() periodically
+            cv_not_empty_.wait_for(lk, std::chrono::milliseconds(50));
+        }
     }
 
     const TimeStat& formation_stat() const { return formation_stat_; }

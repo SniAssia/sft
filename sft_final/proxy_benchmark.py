@@ -113,7 +113,7 @@ def run_epoch_proxy(
     model: Optional[ProxyModel] = None,
     method: str = "round_robin",
     max_pools: Optional[int] = None,
-    idle_grace: int = 200,
+    idle_grace: int = 20,
 ) -> EpochStats:
     """Drive the C++ pipeline for ONE epoch (no model) and aggregate proxy stats.
 
