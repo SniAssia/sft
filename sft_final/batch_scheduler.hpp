@@ -17,6 +17,17 @@
 //     waits for the next resident window, or ends the epoch if the streamer is
 //     done).
 //
+// DRAIN-MODE FIX:
+//   The empty-band rule above deliberately treats "empty but NOT exhausted" as
+//   "more is coming" so it can signal a refill. That is correct mid-stream but
+//   fatal at end of stream: if the streamer has finished but a band's exhausted
+//   flag is stale, that band reads as non-dry forever, all_categories_dry()
+//   never becomes true, and the consumer spins (skipped_ climbs, no pool ever
+//   emitted). Once the streamer signals it is DONE, there is no "more coming":
+//   an empty band is dry, full stop. notify_stream_done() flips the scheduler
+//   into that terminal interpretation so the tail drains 100% from whatever is
+//   left and the epoch can actually end.
+//
 // A BASELINE mode (baseline=true) ignores categories: it draws B random samples
 // across all fit bands and lets the collator pad to the batch max — the "previous
 // method" used for the padding / proxy-time comparison.
@@ -63,6 +74,27 @@ public:
     uint64_t fallback_pools() const { return fallback_pools_.load(std::memory_order_relaxed); }
     uint64_t skipped_categories() const { return skipped_.load(std::memory_order_relaxed); }
 
+    // --- termination support ---------------------------------------------------
+    // Called by the prefetcher once the streamer reports done(). After this the
+    // scheduler treats any empty band as dry regardless of its exhausted flag, so
+    // the residual tail drains 100% from whatever remains and all_categories_dry()
+    // can finally become true. Idempotent.
+    void notify_stream_done() { stream_done_.store(true, std::memory_order_relaxed); }
+    bool stream_done() const { return stream_done_.load(std::memory_order_relaxed); }
+
+    // Total samples still sitting across all band queues. The prefetcher uses
+    // this as the authoritative "is there anything left to form" signal — it is
+    // immune to any single stale exhausted flag.
+    size_t queues_total() const { return queues_.total(); }
+
+    // a category is dry when every band it uses is empty (and, mid-stream, also
+    // exhausted). Public so the prefetcher can gate epoch-end on it.
+    bool all_categories_dry() const {
+        for (const auto& cat : cfg_.profiles)
+            if (!category_dry_(cat)) return false;
+        return true;
+    }
+
 private:
     // ---------------- round-robin category path ----------------
     CandidatePool round_robin_pool_() {
@@ -81,19 +113,18 @@ private:
         return CandidatePool{};   // all categories dry/empty this instant
     }
 
-    // a category is dry when every band's queue is empty AND exhausted
-    bool category_dry_(const BatchProfile& cat) const {
-        auto band_dry = [&](int b) {
-            return queues_.size(static_cast<uint32_t>(b)) == 0 &&
-                   queues_.is_exhausted(static_cast<uint32_t>(b));
-        };
-        if (cat.is_chunked || cat.bands[0] == cat.bands[1]) return band_dry(cat.bands[0]);
-        return band_dry(cat.bands[0]) && band_dry(cat.bands[1]);
+    // A band is "dry" when its queue is empty AND either it is exhausted (no more
+    // from the resident shards) OR the streamer is done (no more, ever). The
+    // stream_done_ clause is what lets the drain tail terminate.
+    bool band_dry_(int b) const {
+        const uint32_t ub = static_cast<uint32_t>(b);
+        return queues_.size(ub) == 0 &&
+               (queues_.is_exhausted(ub) || stream_done_.load(std::memory_order_relaxed));
     }
-    bool all_categories_dry() const {
-        for (const auto& cat : cfg_.profiles)
-            if (!category_dry_(cat)) return false;
-        return true;
+
+    bool category_dry_(const BatchProfile& cat) const {
+        if (cat.is_chunked || cat.bands[0] == cat.bands[1]) return band_dry_(cat.bands[0]);
+        return band_dry_(cat.bands[0]) && band_dry_(cat.bands[1]);
     }
 
     CandidatePool fill_category_(const BatchProfile& cat, int ci) {
@@ -181,6 +212,8 @@ private:
     LengthAwareQueues& queues_;
     std::mt19937_64 rng_;
     int rr_index_ = 0;
+
+    std::atomic<bool> stream_done_{false};
 
     std::array<std::atomic<uint64_t>, NUM_BANDS> empty_alerts_{};
     std::atomic<uint64_t> fallback_pools_{0};

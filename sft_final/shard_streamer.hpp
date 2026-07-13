@@ -8,6 +8,16 @@
 // == false -> signal a refill) from "dry for the loaded shards" (exhausted ==
 // true -> fall back 100% to the other band). When the window is fully streamed,
 // the next W shards load and exhaustion flags reset for bands they contain.
+//
+// TERMINATION FIX:
+//   The per-window exhaustion bookkeeping is a *refill* hint, not a reliable
+//   end-of-stream signal — a band can end up empty-but-not-exhausted at true
+//   end of stream (e.g. a band cleared at the start of the final window whose
+//   last set_exhausted() races with consumption, or a rank whose shard set is
+//   empty so stream_window_ never runs). That single stale flag keeps
+//   all_categories_dry() false forever and the epoch never ends.
+//   Once loop_() exits, nothing more will EVER be pushed for any band, so by
+//   definition every band is exhausted. We set that explicitly before done_.
 #pragma once
 #include <atomic>
 #include <chrono>
@@ -66,7 +76,15 @@ private:
             }
             ++epoch;
         }
-        done_ = true;
+
+        // End of stream (all epochs done, or stopped). Nothing more will ever be
+        // pushed, so every band is exhausted by definition. Mark them all so the
+        // scheduler's "empty && exhausted" dryness test can reach a terminal
+        // state even if a per-window flag was missed or a band never appeared.
+        // done_ is published AFTER the flags so any consumer that observes
+        // done_ == true also observes exhausted == true.
+        for (uint32_t b = 0; b < NUM_BANDS; ++b) queues_.set_exhausted(b);
+        done_.store(true, std::memory_order_release);
     }
 
     void stream_window_(const std::vector<std::string>& window, std::mt19937_64& rng) {
