@@ -4,8 +4,8 @@
     "path": "tatsu-lab/alpaca",
     "source": "hf",
     "format": "alpaca",
-    "split": "train",
-    "limit": null
+    "split": "train"
+    
   },
   {
     "name": "ultrachat",
@@ -13,18 +13,17 @@
     "source": "hf",
     "format": "chat",
     "split": "train_sft",
-    
-    "limit": null
+    "streaming": true
+
   },
   {
-    "name": "openorca",
-    "path": "Open-Orca/OpenOrca",
+    "name": "aya",
+    "path": "CohereLabs/aya_dataset",
     "source": "hf",
     "format": "pair",
     "split": "train",
-    "streaming": true,
-    "limit": 200000,
-    "prompt_field": "question",
-    "response_field": "response"
-}
+    "prompt_field": "inputs",
+    "response_field": "targets",
+    "streaming": true
+  }
 ]
