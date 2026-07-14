@@ -38,9 +38,13 @@ struct StreamerConfig {
     std::vector<std::string> shards;    // ALL shard paths (rank subset chosen inside)
     DistConfig dist;
     size_t max_queue_occupancy = 50000; // per-band soft cap (backpressure)
+    
     int num_epochs = -1;                // -1 => stream forever until stop()
     uint64_t shuffle_seed = 2024;
-    int resident_window = 4;            // W: shards held resident together
+    int resident_window = 4;  
+    uint32_t band_short_max  = 512;    // ADD
+    uint32_t band_medium_max = 1536;   // ADD
+    uint32_t max_seq_len     = 2048;           // W: shards held resident together
 };
 
 class ShardStreamer {
@@ -98,7 +102,10 @@ private:
         for (uint32_t s = 0; s < readers.size(); ++s) {
             const uint32_t n = readers[s]->num_samples();
             for (uint32_t i = 0; i < n; ++i) {
-                uint32_t b = readers[s]->band_of(i);
+                uint32_t tl  = readers[s]->total_len_of(i);   // CHANGED: read length
+                uint32_t isk = readers[s]->is_chunked_of(i);  // CHANGED: read chunk flag
+                uint32_t b = band_from_len(tl, isk, cfg_.band_short_max,
+                                           cfg_.band_medium_max, cfg_.max_seq_len);
                 items.push_back({s, i, b});
                 pending[b]++;
             }
@@ -117,11 +124,11 @@ private:
             while (running_ && queues_.size(it.band) >= cfg_.max_queue_occupancy
                    && !any_hungry_())
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            if (!running_) return;
-            queues_.push(readers[it.shard]->get(it.idx));
+            Sample smp = readers[it.shard]->get(it.idx);     // CHANGED: decode first
+            smp.band = it.band;                              // ADD: stamp load-time band
+            queues_.push(std::move(smp));                    // CHANGED: push the stamped sample
             queues_.clear_hungry(it.band);
             if (--pending[it.band] == 0) queues_.set_exhausted(it.band);
-            streamed_.fetch_add(1, std::memory_order_relaxed);
         }
     }
 

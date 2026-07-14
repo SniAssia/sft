@@ -48,6 +48,16 @@ public:
     uint32_t num_samples()    const { return num_samples_; }
     uint32_t max_seq_length() const { return max_seq_length_; }
     uint32_t band_of(uint32_t i) const { return index_[i].band; }
+    uint32_t total_len_of(uint32_t i) const {
+        const uint8_t* p = base_ + index_[i].offset;
+        uint32_t tl; std::memcpy(&tl, p + 3 * 4, 4);   // h[3] = total_len
+        return tl;
+    }
+    uint32_t is_chunked_of(uint32_t i) const {
+        const uint8_t* p = base_ + index_[i].offset;
+        uint32_t isk; std::memcpy(&isk, p + 4 * 4, 4); // h[4] = is_chunked
+        return isk;
+    }
 
     // Decode sample i into a Sample (copies token ids out of the mmap).
     Sample get(uint32_t i) const {

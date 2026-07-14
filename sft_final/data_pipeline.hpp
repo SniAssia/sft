@@ -61,6 +61,9 @@ public:
         scfg.num_epochs = cfg_.num_epochs;
         scfg.shuffle_seed = cfg_.seed;
         scfg.resident_window = cfg_.resident_window;
+        scfg.band_short_max  = cfg_.band_short_max;     
+        scfg.band_medium_max = cfg_.band_medium_max;    
+        scfg.max_seq_len     = cfg_.band_max_seq_len;  
         streamer_ = std::make_unique<ShardStreamer>(std::move(scfg), *queues_);
 
         SchedulerConfig schcfg;

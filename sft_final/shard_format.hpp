@@ -6,6 +6,20 @@
 
 namespace uds {
 
+enum Band : uint32_t { BAND_SHORT = 0, BAND_MEDIUM = 1, BAND_LONG = 2, BAND_CHUNKED = 3 };
+constexpr int NUM_BANDS = 4;
+
+// Compute band from total length + cutoffs at LOAD time (so cutoffs can change
+// without rebuilding shards). is_chunked overrides to CHUNKED.
+inline uint32_t band_from_len(uint32_t total_len, bool is_chunked,
+                              uint32_t short_max, uint32_t medium_max,
+                              uint32_t max_seq_len) {
+    if (is_chunked || total_len > max_seq_len) return BAND_CHUNKED;
+    if (total_len <  short_max)  return BAND_SHORT;
+    if (total_len <  medium_max) return BAND_MEDIUM;
+    return BAND_LONG;
+}
+
 constexpr char       MAGIC[4]        = {'U', 'D', 'S', 'S'};
 constexpr uint32_t   FORMAT_VERSION  = 1;
 constexpr int        HEADER_SIZE     = 64;
