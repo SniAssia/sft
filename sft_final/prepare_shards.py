@@ -368,98 +368,51 @@ def band_of(total_len: int, cfg: Config, is_chunked: int) -> int:
 # ----------------------------------------------------------------------------
 # SOURCE READERS  (Phase 1: one thread per dataset -> Ready Queue)
 # ----------------------------------------------------------------------------
-import glob
-
 def iter_source(ds: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
-    """
-    Supported sources:
-        hf
-        json
-        jsonl
-        parquet
-    """
+    """Yield raw dict records from a dataset spec.
 
+    Optional spec keys:
+        "limit":     int  -> stop after N records (quick tests on big datasets)
+        "streaming": bool -> HF streaming (no full download; good for ultrachat)
+        "split":     e.g. "train", "train_sft", or a slice "train_sft[:2000]"
+    """
     src = ds.get("source", "jsonl")
     path = ds["path"]
     limit = ds.get("limit")
 
     def _capped(it):
-        if limit is None:
+        if not limit:
             yield from it
-        else:
-            for i, rec in enumerate(it):
-                if i >= limit:
-                    break
-                yield rec
+            return
+        for i, rec in enumerate(it):
+            if i >= limit:
+                break
+            yield rec
 
-    # -------------------------------------------------------
-    # HuggingFace
-    # -------------------------------------------------------
     if src == "hf":
         from datasets import load_dataset
-
         split = ds.get("split", "train")
-
-        if ds.get("streaming", False):
-            data = load_dataset(
-                path,
-                split=split,
-                streaming=True
-            )
+        if ds.get("streaming"):
+            data = load_dataset(path, split=split, streaming=True)
         else:
-            data = load_dataset(
-                path,
-                split=split
-            )
-
+            data = load_dataset(path, split=split)
         yield from _capped(data)
-
-    # -------------------------------------------------------
-    # Local JSONL
-    # -------------------------------------------------------
     elif src == "jsonl":
-
-        def _reader():
-            with open(path, encoding="utf-8") as f:
+        def _lines():
+            with open(path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line:
                         yield json.loads(line)
-
-        yield from _capped(_reader())
-
-    # -------------------------------------------------------
-    # Local JSON
-    # -------------------------------------------------------
+        yield from _capped(_lines())
     elif src == "json":
-
-        with open(path, encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-
         yield from _capped(data)
-
-    # -------------------------------------------------------
-    # Local Parquet
-    # -------------------------------------------------------
-    elif src == "parquet":
-
-        from datasets import load_dataset
-
-        files = sorted(glob.glob(path))
-
-        if len(files) == 0:
-            raise FileNotFoundError(path)
-
-        data = load_dataset(
-            "parquet",
-            data_files=files,
-            split="train"
-        )
-
-        yield from _capped(data)
-
     else:
         raise ValueError(f"Unknown source '{src}'")
+
+
 def source_thread(ds: Dict[str, Any], ready_q: "queue.Queue",
                   stats: Dict[str, int], stats_lock: threading.Lock) -> None:
     name = ds["name"]
