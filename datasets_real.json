@@ -13,7 +13,7 @@
     "source": "hf",
     "format": "chat",
     "split": "train_sft",
-    "streaming": true,
+    
     "limit": null
   },
   {
@@ -24,7 +24,6 @@
     "split": "train",
     "limit": null,
     "prompt_field": "inputs",
-    "response_field": "targets",
-    "streaming": true
+    "response_field": "targets"
   }
 ]
