@@ -441,6 +441,7 @@ class ShardWriter:
         self.shard_idx = 0
         self.total_written = 0
         self.band_counts = {0: 0, 1: 0, 2: 0, 3: 0}
+        self.length_hist = {}   
 
     def add(self, ts: TokSample) -> None:
         self.buf.append(ts)
@@ -483,6 +484,9 @@ class ShardWriter:
             rec, nbytes = self._record_bytes(ts)
             band = band_of(ts.total_len, cfg, ts.is_chunked)
             self.band_counts[band] += 1
+            if not ts.is_chunked:                              # ADD
+                L = min(ts.total_len, cfg.max_seq_length)      # ADD (clamp to cap)
+                self.length_hist[L] = self.length_hist.get(L, 0) + 1   #
             index.append((cursor, nbytes, band))
             records.append(rec)
             cursor += nbytes
@@ -601,6 +605,7 @@ def _write_meta(cfg: Config, tokenizer: JaisTokenizerWrapper,
         "num_shards": writer.shard_idx,
         "num_samples": writer.total_written,
         "band_counts": writer.band_counts,
+        "length_histogram": writer.length_hist, 
         "case_codes": {"FIT": 0, "LONG_CTX": 1, "LONG_RESP": 2, "MIXED": 3},
         "band_codes": {"SHORT": 0, "MEDIUM": 1, "LONG": 2, "CHUNKED": 3},
         "loss_mask_rule": "loss on last response_len tokens only",
@@ -628,6 +633,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--band-medium-max", type=int, default=1536)
     ap.add_argument("--no-bos", action="store_true")
     ap.add_argument("--no-eos", action="store_true")
+    ap.add_argument("--band-short-max",  type=int, default=None)
+    ap.add_argument("--band-medium-max", type=int, default=None)
     args = ap.parse_args(argv)
 
     with open(args.config, "r", encoding="utf-8") as f:
@@ -645,6 +652,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         add_bos=not args.no_bos,
         add_eos=not args.no_eos,
     )
+    if args.band_short_max:  cfg.band_short_max  = args.band_short_max
+    if args.band_medium_max: cfg.band_medium_max = args.band_medium_max
     run(cfg, datasets)
     return 0
 
