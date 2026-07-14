@@ -17,13 +17,14 @@
     "limit": null
   },
   {
-    "name": "aya",
-    "path": "CohereLabs/aya_dataset",
+    "name": "openorca",
+    "path": "Open-Orca/OpenOrca",
     "source": "hf",
     "format": "pair",
     "split": "train",
-    "limit": null,
-    "prompt_field": "inputs",
-    "response_field": "targets"
-  }
+    "streaming": true,
+    "limit": 200000,
+    "prompt_field": "question",
+    "response_field": "response"
+}
 ]
