@@ -5,16 +5,15 @@
     "source": "hf",
     "format": "alpaca",
     "split": "train"
-    
   },
   {
-    "name": "ultrachat",
-    "path": "HuggingFaceH4/ultrachat_200k",
+    "name": "dolly",
+    "path": "databricks/databricks-dolly-15k",
     "source": "hf",
-    "format": "chat",
-    "split": "train_sft",
-    "streaming": true
-
+    "format": "pair",
+    "split": "train",
+    "prompt_field": "instruction",
+    "response_field": "response"
   },
   {
     "name": "aya",
@@ -23,7 +22,16 @@
     "format": "pair",
     "split": "train",
     "prompt_field": "inputs",
-    "response_field": "targets",
-    "streaming": true
+    "response_field": "targets"
+  },
+  {
+    "name": "platypus",
+    "path": "garage-bAInd/Open-Platypus",
+    "source": "hf",
+    "format": "pair",
+    "split": "train",
+    "prompt_field": "instruction",
+    "response_field": "output",
+    "input_field": "input"
   }
 ]
