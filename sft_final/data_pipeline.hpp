@@ -37,7 +37,9 @@ struct PipelineConfig {
     std::vector<bool>                 profile_is_chunked;
     bool baseline = false;              // true => length-agnostic random batching
     int resident_window = 4;           // W: shards held resident together
-
+    uint32_t band_short_max   = 512;
+    uint32_t band_medium_max  = 1536;
+    uint32_t band_max_seq_len = 2048;
     // collator
     int64_t pad_id = 0;
     int64_t ignore_index = -100;
