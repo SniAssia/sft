@@ -24,6 +24,7 @@ struct CollatorConfig {
     int64_t ignore_index = -100;
     int64_t option_b_window = 2048;   // budget for the chunked scoring window
     int64_t pad_to_multiple = 8;      // pad T up to a multiple (tensor-core friendly)
+    uint32_t chunked_band = BAND_CHUNKED;  // = num_bands-1 (set from PipelineConfig)
 };
 
 // The tensor bundle handed to Python. torch::Tensor auto-converts to torch.Tensor.
@@ -111,7 +112,7 @@ private:
         auto opts = torch::TensorOptions().dtype(torch::kInt64);
         CollatedPool out;
         out.is_chunked = true;
-        out.band = BAND_CHUNKED;
+        out.band = cfg_.chunked_band;
         out.profile_index = pool.profile_index;
         out.mixed = pool.mixed;
         out.fell_back = pool.fell_back;

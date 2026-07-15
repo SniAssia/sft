@@ -8,6 +8,7 @@
 #include <deque>
 #include <mutex>
 #include <optional>
+#include <cassert>
 
 #include "sample.hpp"
 #include "shard_format.hpp"
@@ -55,9 +56,15 @@ private:
     bool closed_ = false;
 };
 
-// Bundles the 4 bands. Routing is a pure array index — the "O(1) insertion".
+// Bundles the bands. Routing is a pure array index — the "O(1) insertion".
+// Arrays are sized MAX_BANDS (compile time); only num_bands_ of them are used.
 class LengthAwareQueues {
 public:
+    explicit LengthAwareQueues(uint32_t num_bands = 4) : num_bands_(num_bands) {
+        assert(num_bands >= 1 && num_bands <= static_cast<uint32_t>(MAX_BANDS));
+    }
+    uint32_t num_bands() const { return num_bands_; }
+
     void push(Sample&& s) {
         uint32_t b = s.band;
         queues_[b].push(std::move(s));
@@ -67,9 +74,11 @@ public:
 
     size_t size(uint32_t b) const { return queues_[b].size(); }
     size_t total() const {
-        size_t t = 0; for (auto& q : queues_) t += q.size(); return t;
+        size_t t = 0;
+        for (uint32_t b = 0; b < num_bands_; ++b) t += queues_[b].size();
+        return t;
     }
-    void close_all() { for (auto& q : queues_) q.close(); }
+    void close_all() { for (uint32_t b = 0; b < num_bands_; ++b) queues_[b].close(); }
 
     // --- Option-A demand signaling (scheduler -> streamer) ---
     // Scheduler sets a band "hungry" when it finds that queue empty; the streamer
@@ -89,9 +98,10 @@ public:
     bool is_exhausted(uint32_t b) const { return exhausted_[b].load(std::memory_order_relaxed); }
 
 private:
-    std::array<SampleQueue, NUM_BANDS> queues_;
-    std::array<std::atomic<bool>, NUM_BANDS> hungry_{};     // all false initially
-    std::array<std::atomic<bool>, NUM_BANDS> exhausted_{};  // resident-window dry
+    uint32_t num_bands_;
+    std::array<SampleQueue, MAX_BANDS> queues_;
+    std::array<std::atomic<bool>, MAX_BANDS> hungry_{};     // all false initially
+    std::array<std::atomic<bool>, MAX_BANDS> exhausted_{};  // resident-window dry
 };
 
 } // namespace uds

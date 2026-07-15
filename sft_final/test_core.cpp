@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
 
     LengthAwareQueues queues;
     uint32_t total = 0, chunked = 0;
-    std::array<uint32_t, NUM_BANDS> band_counts{0, 0, 0, 0};
+    std::array<uint32_t, MAX_BANDS> band_counts{};
 
     for (auto& path : shards) {
         ShardReader reader(path);

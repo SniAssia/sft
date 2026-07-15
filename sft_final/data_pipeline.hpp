@@ -37,9 +37,10 @@ struct PipelineConfig {
     std::vector<bool>                 profile_is_chunked;
     bool baseline = false;              // true => length-agnostic random batching
     int resident_window = 4;           // W: shards held resident together
-    uint32_t band_short_max   = 512;
-    uint32_t band_medium_max  = 1536;
+    // --- load-time bands: k-1 ascending cutoffs; band count = size()+2 ---
+    std::vector<uint32_t> band_cutoffs{512, 1536};
     uint32_t band_max_seq_len = 2048;
+
     // collator
     int64_t pad_id = 0;
     int64_t ignore_index = -100;
@@ -54,7 +55,7 @@ struct PipelineConfig {
 class DataPipeline {
 public:
     explicit DataPipeline(PipelineConfig cfg) : cfg_(std::move(cfg)) {
-        queues_ = std::make_unique<LengthAwareQueues>();
+        queues_ = std::make_unique<LengthAwareQueues>(num_bands_for(cfg_.band_cutoffs));
 
         StreamerConfig scfg;
         scfg.shards = cfg_.shards;
@@ -63,9 +64,8 @@ public:
         scfg.num_epochs = cfg_.num_epochs;
         scfg.shuffle_seed = cfg_.seed;
         scfg.resident_window = cfg_.resident_window;
-        scfg.band_short_max  = cfg_.band_short_max;     
-        scfg.band_medium_max = cfg_.band_medium_max;    
-        scfg.max_seq_len     = cfg_.band_max_seq_len;  
+        scfg.band_cutoffs = cfg_.band_cutoffs;
+        scfg.max_seq_len  = cfg_.band_max_seq_len;
         streamer_ = std::make_unique<ShardStreamer>(std::move(scfg), *queues_);
 
         SchedulerConfig schcfg;
@@ -89,6 +89,7 @@ public:
         ccfg.ignore_index = cfg_.ignore_index;
         ccfg.option_b_window = cfg_.option_b_window;
         ccfg.pad_to_multiple = cfg_.pad_to_multiple;
+        ccfg.chunked_band = num_bands_for(cfg_.band_cutoffs) - 1;
         collator_ = std::make_unique<Collator>(ccfg);
 
         PrefetchConfig pcfg;

@@ -187,9 +187,9 @@ private:
         pool.mixed = true;
         // round-robin across all bands, taking one at a time until B or all empty
         size_t safety = 0;
-        while (pool.samples.size() < cfg_.B && safety < cfg_.B * NUM_BANDS) {
+        while (pool.samples.size() < cfg_.B && safety < cfg_.B * queues_.num_bands()) {
             bool any = false;
-            for (uint32_t b = 0; b < NUM_BANDS && pool.samples.size() < cfg_.B; ++b) {
+            for (uint32_t b = 0; b < queues_.num_bands() && pool.samples.size() < cfg_.B; ++b) {
                 auto s = queues_.band(b).try_pop();
                 if (s) { pool.samples.push_back(std::move(*s)); any = true; }
             }
@@ -215,7 +215,7 @@ private:
 
     std::atomic<bool> stream_done_{false};
 
-    std::array<std::atomic<uint64_t>, NUM_BANDS> empty_alerts_{};
+    std::array<std::atomic<uint64_t>, MAX_BANDS> empty_alerts_{};
     std::atomic<uint64_t> fallback_pools_{0};
     std::atomic<uint64_t> skipped_{0};
 };

@@ -27,11 +27,6 @@ import os
 from typing import Dict, List, Tuple
 
 import numpy as np
-
-
-# ---------------------------------------------------------------------------
-# Core: exact minimum-padding partition into k bands via DP.
-# ---------------------------------------------------------------------------
 def optimal_bands(lengths: np.ndarray, counts: np.ndarray, k: int):
     """
     lengths : sorted unique lengths, shape (n,)
@@ -81,10 +76,6 @@ def optimal_bands(lengths: np.ndarray, counts: np.ndarray, k: int):
     edges.sort()
     return edges, float(best[n][k])
 
-
-# ---------------------------------------------------------------------------
-# Choose k at the elbow of the padding-vs-k curve.
-# ---------------------------------------------------------------------------
 def choose_k(lengths, counts, kmax: int, elbow_frac: float):
     """
     Returns (k_star, curve) where curve = {k: total_pad}.
@@ -105,10 +96,6 @@ def choose_k(lengths, counts, kmax: int, elbow_frac: float):
         k_star = k
     return k_star, curve
 
-
-# ---------------------------------------------------------------------------
-# Guard 1: merge starved (thin) bands into their neighbor.
-# ---------------------------------------------------------------------------
 def starvation_guard(edges, lengths, counts, min_frac: float):
     """
     Drop any band holding < min_frac of all samples by removing its edge
@@ -136,9 +123,7 @@ def starvation_guard(edges, lengths, counts, min_frac: float):
     return edges
 
 
-# ---------------------------------------------------------------------------
 # Guard 2: resident-window feasibility — cap k so each band is fed enough.
-# ---------------------------------------------------------------------------
 def window_feasible_k(k, resident_window, avg_shard_samples, batch_size, safety=3.0):
     """
     Each band receives ~ resident_window * avg_shard_samples / k samples per
@@ -149,10 +134,6 @@ def window_feasible_k(k, resident_window, avg_shard_samples, batch_size, safety=
     max_k = max(1, int(supply / (safety * batch_size)))
     return min(k, max_k)
 
-
-# ---------------------------------------------------------------------------
-# Driver.
-# ---------------------------------------------------------------------------
 def derive(meta: Dict, resident_window: int, batch_size: int,
            kmax: int, elbow_frac: float, min_band_frac: float,
            window_safety: float):
@@ -181,14 +162,19 @@ def derive(meta: Dict, resident_window: int, batch_size: int,
     edges = starvation_guard(edges, lengths, counts, min_band_frac)
 
     # 5) per-band populations -> sampling weights; +1 CHUNKED band for > max_seq
-    total = counts.sum()
+    # NOTE: the histogram covers NON-chunked samples only, so the chunked count
+    # comes from band_counts. All weights must share ONE denominator (every
+    # sample, chunked included) or they won't form a valid distribution.
+    total = int(counts.sum())                                   # non-chunked
+    chunked = int(meta.get("band_counts", {}).get("3", 0))      # chunked
+    grand_total = max(1, total + chunked)                       # ALL samples
     lo = 0
     band_defs = []
     for bi, e in enumerate(sorted(edges)):
         hi = np.searchsorted(lengths, e, side="right")
         pop = int(counts[lo:hi].sum())
         band_defs.append({"band": bi, "max_len": int(e),
-                          "count": pop, "weight": pop / total})
+                          "count": pop, "weight": pop / grand_total})
         lo = hi
 
     n_len_bands = len(band_defs)
@@ -199,7 +185,9 @@ def derive(meta: Dict, resident_window: int, batch_size: int,
     profile_bands = [[b["band"], b["band"]] for b in band_defs] + [[chunked_band, chunked_band]]
     profile_mix = [[1.0, 0.0] for _ in profile_bands]
     profile_is_chunked = [False] * n_len_bands + [True]
-    weights = [b["weight"] for b in band_defs] + [meta.get("band_counts", {}).get("3", 0) / max(1, total)]
+    weights = [b["weight"] for b in band_defs] + [chunked / grand_total]
+    _wsum = sum(weights)
+    assert abs(_wsum - 1.0) < 1e-6, f"category weights must sum to 1, got {_wsum}"
 
     # the length cutoffs to feed back into prepare_shards Config
     # (short_max, medium_max, ... = the internal edges, excluding the top which == max_seq)
@@ -213,6 +201,8 @@ def derive(meta: Dict, resident_window: int, batch_size: int,
         "band_edges": [b["max_len"] for b in band_defs],
         "internal_cutoffs": internal_cutoffs,      # feed these back into Config
         "band_populations": [b["count"] for b in band_defs],
+        "chunked_population": chunked,
+        "total_samples_all_bands": grand_total,
         "profile_bands": profile_bands,
         "profile_mix": profile_mix,
         "profile_is_chunked": profile_is_chunked,
