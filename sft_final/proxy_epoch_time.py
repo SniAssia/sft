@@ -75,27 +75,36 @@ def calibrate_A_C(model, optimizer, *, B, widths, vocab_size, device="cuda",
             table.append((T, float(np.median(samples))))
             print(f"  width T={T:5d}  ->  {1000*np.median(samples):8.2f} ms/step")
 
-    # least-squares fit t = A*(B*T) + C*(B*T^2)
+    # least-squares fit t = D + A*(B*T) + C*(B*T^2)
+    # D is the FIXED per-step overhead (kernel launches, optimizer, framework)
+    # that exists regardless of batch shape. Without it the fit absorbs that
+    # cost by inflating A and driving C negative (attention can't be free).
     Ts = np.array([t for t, _ in table], dtype=np.float64)
     ys = np.array([s for _, s in table], dtype=np.float64)
-    X = np.column_stack([B * Ts, B * Ts**2])          # columns: (B*T), (B*T^2)
+    X = np.column_stack([np.ones_like(Ts), B * Ts, B * Ts**2])   # 1, (B*T), (B*T^2)
     coef, *_ = np.linalg.lstsq(X, ys, rcond=None)
-    A, C = float(coef[0]), float(coef[1])
-    print(f"\n  fit: time = {A:.3e}*(B*T) + {C:.3e}*(B*T^2)")
-    return A, C, table
+    D, A, C = float(coef[0]), float(coef[1]), float(coef[2])
+    resid = ys - X @ coef
+    print(f"\n  fit: time = {D:.4f} + {A:.3e}*(B*T) + {C:.3e}*(B*T^2)")
+    print(f"       fixed overhead D = {1000*D:.1f} ms/step | "
+          f"max residual = {1000*np.abs(resid).max():.2f} ms")
+    if C < 0:
+        print("       WARNING: C < 0 (non-physical) — add more/wider calibration points")
+    return D, A, C, table
 
 
-def proxy_step_seconds(batch_size, padded_width, A, C):
-    """Estimated train time for ONE batch, from its OWN shape."""
+def proxy_step_seconds(batch_size, padded_width, A, C, D=0.0):
+    """Estimated train time for ONE batch, from its OWN shape.
+    D = fixed per-step overhead (matters a lot for small/partial batches)."""
     B, T = batch_size, padded_width
-    return A * (B * T) + C * (B * T * T)
+    return D + A * (B * T) + C * (B * T * T)
 
 
 # ---------------------------------------------------------------------------
 # STEP 2 — estimate: walk the whole epoch (no training), charge each batch its
 #          own time(B, T), sum to the full-epoch estimate. Records per batch.
 # ---------------------------------------------------------------------------
-def estimate_epoch_seconds(pipeline, A, C, *, log_every=2000, idle_grace=200):
+def estimate_epoch_seconds(pipeline, A, C, D=0.0, *, log_every=2000, idle_grace=200):
     per_batch = []
     total_s = 0.0
     padded_tokens = 0
@@ -120,7 +129,7 @@ def estimate_epoch_seconds(pipeline, A, C, *, log_every=2000, idle_grace=200):
 
         B = int(pool.batch_size)
         T = int(pool.padded_width)
-        est = proxy_step_seconds(B, T, A, C)     # this batch's own estimated time
+        est = proxy_step_seconds(B, T, A, C, D)  # this batch's own estimated time
         total_s += est
 
         pt = int(pool.padded_tokens); rt = int(pool.real_tokens)
