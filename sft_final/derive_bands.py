@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-derive_bands.py — data-driven band configuration.
+— data-driven band configuration.
 
 Reads meta.json's length_histogram and computes, from the corpus length
 distribution alone:

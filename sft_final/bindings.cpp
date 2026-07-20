@@ -1,6 +1,14 @@
 // bindings.cpp
 // pybind11 module `uds_loader`. Built as a torch extension so torch::Tensor
 // members auto-convert to torch.Tensor on the Python side.
+"""bindings.cpp serves as a bridge between Python and your C++ implementation. It:
+
+Registers the PipelineConfig, CollatedPool, and DataPipeline C++ classes as Python classes.
+Exposes configuration fields (such as B, pad_id, and shards) so they can be read and modified directly from Python.
+Automatically converts torch::Tensor objects in C++ into torch.Tensor objects in Python.
+Exposes pipeline methods (start, stop, next_pool) so the training loop can control the C++ pipeline.
+Makes internal performance metrics (formation time, stalls, queue size, streamed samples, etc.) accessible for benchmarking.
+Releases Python's Global Interpreter Lock while next_pool() waits for a batch, allowing other Python threads to continue running."""
 #include <torch/extension.h>
 #include <pybind11/stl.h>
 
@@ -11,7 +19,6 @@ using namespace uds;
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.doc() = "UDS SFT C++ data pipeline (reader/queues/scheduler/collator/prefetch/DDP)";
-
     py::class_<PipelineConfig>(m, "PipelineConfig")
         .def(py::init<>())
         .def_readwrite("shards", &PipelineConfig::shards)
@@ -34,7 +41,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def_readwrite("pad_to_multiple", &PipelineConfig::pad_to_multiple)
         .def_readwrite("prefetch_workers", &PipelineConfig::prefetch_workers)
         .def_readwrite("ring_capacity", &PipelineConfig::ring_capacity);
-
     py::class_<CollatedPool, std::shared_ptr<CollatedPool>>(m, "CollatedPool")
         .def_readonly("input_ids", &CollatedPool::input_ids)
         .def_readonly("attention_mask", &CollatedPool::attention_mask)
@@ -57,7 +63,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def_readonly("case_codes", &CollatedPool::case_codes)
         .def_readonly("formation_seconds", &CollatedPool::formation_seconds)
         .def("__len__", [](const CollatedPool& p) { return p.input_ids.size(0); });
-
     py::class_<DataPipeline>(m, "DataPipeline")
         .def(py::init<PipelineConfig>())
         .def("start", &DataPipeline::start)

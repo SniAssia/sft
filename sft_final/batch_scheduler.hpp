@@ -16,8 +16,6 @@
 //     next category; if all categories dry -> return an empty pool (the caller
 //     waits for the next resident window, or ends the epoch if the streamer is
 //     done).
-//
-// DRAIN-MODE FIX:
 //   The empty-band rule above deliberately treats "empty but NOT exhausted" as
 //   "more is coming" so it can signal a refill. That is correct mid-stream but
 //   fatal at end of stream: if the streamer has finished but a band's exhausted
@@ -27,10 +25,6 @@
 //   an empty band is dry, full stop. notify_stream_done() flips the scheduler
 //   into that terminal interpretation so the tail drains 100% from whatever is
 //   left and the epoch can actually end.
-//
-// A BASELINE mode (baseline=true) ignores categories: it draws B random samples
-// across all fit bands and lets the collator pad to the batch max — the "previous
-// method" used for the padding / proxy-time comparison.
 #pragma once
 #include <array>
 #include <atomic>
@@ -43,7 +37,6 @@
 namespace uds {
 
 // A category: two bands filled at `mix`. Single-band (e.g. Chunked) sets both
-// bands equal and mix = {1,0}.
 struct BatchProfile {
     std::array<int, 2>   bands = {BAND_SHORT, BAND_MEDIUM};
     std::array<float, 2> mix   = {0.5f, 0.5f};

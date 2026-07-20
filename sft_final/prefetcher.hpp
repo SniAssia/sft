@@ -1,4 +1,3 @@
-// prefetcher.hpp
 // Phase 9 — while the GPU trains on pool k, background threads build pool k+1
 // (scheduler -> collator) and park it in a bounded ring. The consumer's
 // next_pool() then pops instantly; any time it *does* wait is recorded as the

@@ -1,4 +1,3 @@
-// data_pipeline.hpp
 // Facade that wires Phases 5-11 into one object Python drives:
 //   streamer -> length queues -> scheduler -> collator -> prefetcher.
 // Python calls next_pool() and gets padded tensors; timing() exposes the

@@ -1,4 +1,3 @@
-// length_queues.hpp
 // Phase 7 — four persistent, thread-safe length-aware queues.
 // O(1) insertion by precomputed band; no sorting, no tokenization here.
 #pragma once
