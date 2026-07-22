@@ -9,6 +9,8 @@ Automatically converts torch::Tensor objects in C++ into torch.Tensor objects in
 Exposes pipeline methods (start, stop, next_pool) so the training loop can control the C++ pipeline.
 Makes internal performance metrics (formation time, stalls, queue size, streamed samples, etc.) accessible for benchmarking.
 Releases Python's Global Interpreter Lock while next_pool() waits for a batch, allowing other Python threads to continue running."""
+#include <torch/python.h>  
+
 #include <torch/extension.h>
 #include <pybind11/stl.h>
 
