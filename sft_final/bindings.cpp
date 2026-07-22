@@ -1,6 +1,11 @@
 // bindings.cpp
 // pybind11 module `uds_loader`. Built as a torch extension so torch::Tensor
 // members auto-convert to torch.Tensor on the Python side.
+// bindings.cpp
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+
+
 """bindings.cpp serves as a bridge between Python and your C++ implementation. It:
 
 Registers the PipelineConfig, CollatedPool, and DataPipeline C++ classes as Python classes.
@@ -84,3 +89,4 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def("skipped_categories", &DataPipeline::skipped_categories)
         .def("streamer_done", &DataPipeline::streamer_done);
 }
+#pragma GCC diagnostic pop
